@@ -1,0 +1,243 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[12pt]{article}										
+
+\usepackage{fullpage} %[cm] for smaller margins
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\usepackage{bbm}
+
+\usepackage[sort&compress,numbers]{natbib}
+\bibliographystyle{apsrev4-2}
+
+\usepackage[
+colorlinks=true,
+linkcolor=blue,
+implicit=true,
+breaklinks=true,
+bookmarks=true,
+bookmarksnumbered=true,
+hyperfootnotes=true,
+debug=true,
+naturalnames=false,
+citecolor=blue,
+pdfview=FitH,
+pdfstartview=FitH,
+hyperindex=true,
+urlcolor=blue
+]{hyperref}
+
+\title{Calculation of Direct Dipole Hyperfine Coupling Tensor}
+\author{Adam P. Dioguardi}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\begin{document}
+\maketitle
+
+We can use classical magnetostatics to calculate the magnetic induction $\mathbf{B}$ at the nuclear site due to a distant magnetic dipole $\mathbf{m}$ (due to a electron spin/magnetic moment). We will then pull out the magnetic moment, and define the dipolar hyperfine coupling tensor, which will be composed of matrix elements that include everything but the magnetic moment vector. 
+
+We start with the vector potential of a classical magnetic dipole moment located at the origin in the far-field, as derived in equation 5.55 of Jackson~\cite{Jackson_1998_classical_ellectrodynamics_3rd}:
+\begin{equation}
+\label{eqn:dipole_vector_potential}
+\mathbf{A}(\mathbf{r}) = \frac{\mu_0}{4\pi}\frac{\mathbf{m}\times\mathbf{r}}{r^3}
+\end{equation}
+where $\mu_0$ is the permeability of free space, $\mathbf{r}$ is the position vector (and $r = |r| = \sqrt{x^2 + y^2 + z^2}$. Taking the curl of the vector potential gives us the magnetic induction:
+\begin{align}
+\label{eqn:magnetic_induction_from_vector_potential}
+\mathbf{B}(\mathbf{r}) &= \nabla \times \mathbf{A}(\mathbf{r})\\
+\label{eqn:magnetic_induction_from_vector_potential_dipole}
+\mathbf{B}(\mathbf{r}) &= \frac{\mu_0}{4\pi} \nabla \times \left( \frac{\mathbf{m}\times\mathbf{r}}{r^3} \right)\\
+\label{eqn:magnetic_induction_of_dipole}
+\mathbf{B}(\mathbf{r}) &= \frac{\mu_0}{4\pi} \left( \frac{3\mathbf{r}(\mathbf{m} \cdot \mathbf{r})}{r^5} - \frac{\mathbf{m}}{r^3} \right)
+\end{align}
+
+Now need to choose how to proceed, vector identities or matrix multiplication; considering that we would like to end up with a matrix, I will take that approach. We can write the cross products in terms of matrices~\cite{Liu_2008_HadamardKhatriRao} as follows:
+\begin{align}
+\label{eqn:cross_product_matrix_vector}
+\mathbf{a} \times \mathbf{b} = [\mathbf{a}]_{\times} \mathbf{b} = 
+\begin{bmatrix}
+\phantom{-}0   &           -a_z & \phantom{-}a_y \\ 
+\phantom{-}a_z & \phantom{-}0   &           -a_x \\
+          -a_y & \phantom{-}a_x & \phantom{-}0
+\end{bmatrix}
+\begin{bmatrix}
+b_x \\
+b_y \\
+b_z
+\end{bmatrix}
+\end{align}
+where we have defined the cross product matrix as:
+\begin{align}
+\label{eqn:cross_product_matrix_def}
+[\mathbf{a}]_\times &\equiv 
+\begin{bmatrix}
+\phantom{-}0   &           -a_z & \phantom{-}a_y \\ 
+\phantom{-}a_z & \phantom{-}0   &           -a_x \\
+          -a_y & \phantom{-}a_x & \phantom{-}0
+\end{bmatrix}
+\end{align}
+
+So first we use the anticommutative property of the cross product $\mathbf{a} \times \mathbf{b} = -\mathbf{b} \times \mathbf{a}$ to rewrite equation~\ref{eqn:magnetic_induction_from_vector_potential_dipole} as 
+\begin{equation}
+\label{eqn:magnetic_induction_from_vector_potential_anticommute}
+\mathbf{B}(\mathbf{r}) = -\frac{\mu_0}{4\pi} \nabla \times \left( \frac{\mathbf{r}\times\mathbf{m}}{r^3} \right)
+\end{equation}
+Then we can replace the cross products as matrices:
+\begin{align}
+\label{eqn:magnetic_induction_matrices1}
+\mathbf{B}(\mathbf{r}) = -\frac{\mu_0}{4\pi} \Bigg(
+\begin{bmatrix}
+\phantom{-}0                           &            -\frac{\partial}{\partial z} &  \phantom{-}\frac{\partial}{\partial y} \\ 
+\phantom{-}\frac{\partial}{\partial z} &  \phantom{-}0                           &            -\frac{\partial}{\partial x} \\
+          -\frac{\partial}{\partial y} &  \phantom{-}\frac{\partial}{\partial x} &  \phantom{-}0
+\end{bmatrix}
+\Bigg( 
+\begin{bmatrix}
+\phantom{-}0             &           -\frac{z}{r^3} & \phantom{-}\frac{y}{r^3} \\ 
+\phantom{-}\frac{z}{r^3} & \phantom{-}0             &           -\frac{x}{r^3} \\
+          -\frac{y}{r^3} & \phantom{-}\frac{x}{r^3} & \phantom{-}0
+\end{bmatrix}
+\begin{bmatrix}
+m_x \\
+m_y \\
+m_z
+\end{bmatrix}
+\Bigg)
+\Bigg)
+\end{align}
+Using the associative property of matrix multiplication, we can first multiply the two $(3, 3)$ matricies together and pull out the magnetic moment vector---a $(3, 1)$ matrix:
+\begin{align}
+\label{eqn:magnetic_induction_matrices2}
+\mathbf{B}(\mathbf{r}) = -\frac{\mu_0}{4\pi} \Bigg( \Bigg( 
+\begin{bmatrix}
+\phantom{-}0                           &            -\frac{\partial}{\partial z} &  \phantom{-}\frac{\partial}{\partial y} \\ 
+\phantom{-}\frac{\partial}{\partial z} &  \phantom{-}0                           &            -\frac{\partial}{\partial x} \\
+          -\frac{\partial}{\partial y} &  \phantom{-}\frac{\partial}{\partial x} &  \phantom{-}0
+\end{bmatrix}
+\begin{bmatrix}
+\phantom{-}0             &           -\frac{z}{r^3} & \phantom{-}\frac{y}{r^3} \\ 
+\phantom{-}\frac{z}{r^3} & \phantom{-}0             &           -\frac{x}{r^3} \\
+          -\frac{y}{r^3} & \phantom{-}\frac{x}{r^3} & \phantom{-}0
+\end{bmatrix} \Bigg)
+\begin{bmatrix}
+m_x \\
+m_y \\
+m_z
+\end{bmatrix}
+\Bigg)
+\end{align}
+Now we have the proper form for the magnetic induction $\mathbf{B}({\mathbf{r}}) = \mathbb{A}_\mathrm{dip} \cdot \mathbf{m}$ and all that is left to do is to perform the matrix multiplication and evaluate the partial derivatives to extract $\mathbb{A}_\mathrm{dip}$:
+\begin{align}
+\label{eqn:magnetic_induction_matrices2}
+\mathbb{A}_\mathrm{dip} &= -\frac{\mu_0}{4\pi}
+\begin{bmatrix}
+\phantom{-}0                           &            -\frac{\partial}{\partial z} &  \phantom{-}\frac{\partial}{\partial y} \\ 
+\phantom{-}\frac{\partial}{\partial z} &  \phantom{-}0                           &            -\frac{\partial}{\partial x} \\
+          -\frac{\partial}{\partial y} &  \phantom{-}\frac{\partial}{\partial x} &  \phantom{-}0
+\end{bmatrix}
+\begin{bmatrix}
+\phantom{-}0             &           -\frac{z}{r^3} & \phantom{-}\frac{y}{r^3} \\ 
+\phantom{-}\frac{z}{r^3} & \phantom{-}0             &           -\frac{x}{r^3} \\
+          -\frac{y}{r^3} & \phantom{-}\frac{x}{r^3} & \phantom{-}0
+\end{bmatrix} \\
+&= -\frac{\mu_0}{4\pi}
+\begin{bmatrix}
+\phantom{-}0                           &            -\frac{\partial}{\partial z} &  \phantom{-}\frac{\partial}{\partial y} \\ 
+\phantom{-}\frac{\partial}{\partial z} &  \phantom{-}0                           &            -\frac{\partial}{\partial x} \\
+          -\frac{\partial}{\partial y} &  \phantom{-}\frac{\partial}{\partial x} &  \phantom{-}0
+\end{bmatrix}
+\begin{bmatrix}
+\phantom{-}0                                              &           -z\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} & \phantom{-}y\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \\ 
+\phantom{-}z\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} & \phantom{-}0                                              &           -x\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \\
+          -y\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} & \phantom{-}x\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} & \phantom{-}0
+\end{bmatrix}
+\end{align}
+
+\begin{align}
+\mathbb{A}_\mathrm{dip}^{xx} &= -\frac{\mu_0}{4\pi}\left( 0 - \frac{\partial}{\partial z}\left( z\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) + \frac{\partial}{\partial y}\left( -y\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) \right) \\
+\mathbb{A}_\mathrm{dip}^{xy} &= -\frac{\mu_0}{4\pi}\left( 0 - \frac{\partial}{\partial z}\left( 0 \right) + \frac{\partial}{\partial y}\left( x\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) \right) \\
+\mathbb{A}_\mathrm{dip}^{xz} &= -\frac{\mu_0}{4\pi}\left( 0 - \frac{\partial}{\partial z}\left( -x\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) + \frac{\partial}{\partial y}\left( 0 \right) \right) \\
+\mathbb{A}_\mathrm{dip}^{yx} &= -\frac{\mu_0}{4\pi}\left( \frac{\partial}{\partial z}\left( 0 \right) +  0 - \frac{\partial}{\partial x}\left( -y\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) \right) \\
+\mathbb{A}_\mathrm{dip}^{yy} &= -\frac{\mu_0}{4\pi}\left( \frac{\partial}{\partial z}\left( -z\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) +  0 - \frac{\partial}{\partial x}\left( x\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) \right) \\
+\mathbb{A}_\mathrm{dip}^{yz} &= -\frac{\mu_0}{4\pi}\left( \frac{\partial}{\partial z}\left( y\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) +  0 - \frac{\partial}{\partial x}\left( 0 \right) \right) \\
+\mathbb{A}_\mathrm{dip}^{zx} &= -\frac{\mu_0}{4\pi}\left( -\frac{\partial}{\partial y}\left( 0 \right) + \frac{\partial}{\partial x}\left( z\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) + 0 \right) \\
+\mathbb{A}_\mathrm{dip}^{zy} &= -\frac{\mu_0}{4\pi}\left( -\frac{\partial}{\partial y}\left( -z\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) + \frac{\partial}{\partial x}\left( 0 \right) + 0 \right) \\
+\mathbb{A}_\mathrm{dip}^{zz} &= -\frac{\mu_0}{4\pi}\left( -\frac{\partial}{\partial y}\left( y\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) + \frac{\partial}{\partial x}\left( -x\left( x^2 + y^2 + z^2 \right)^{-\frac{3}{2}} \right) + 0 \right)
+\end{align}
+
+After performing the derivatives, the dipole hyperfine coupling matrix reads:
+\begin{align}
+\mathbb{A}_\mathrm{dip} &=
+\begin{bmatrix}
+\mathbb{A}_\mathrm{dip}^{xx} & \mathbb{A}_\mathrm{dip}^{xy} & \mathbb{A}_\mathrm{dip}^{xz}\\
+\mathbb{A}_\mathrm{dip}^{yx} & \mathbb{A}_\mathrm{dip}^{yy} & \mathbb{A}_\mathrm{dip}^{yz}\\
+\mathbb{A}_\mathrm{dip}^{zx} & \mathbb{A}_\mathrm{dip}^{zy} & \mathbb{A}_\mathrm{dip}^{zz}
+\end{bmatrix} = 
+\begin{bmatrix}
+- \frac{\mu_{0} \left(- 2 x^{2} + y^{2} + z^{2}\right)}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}} & \frac{3 \mu_{0} x y}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}} & \frac{3 \mu_{0} x z}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}}\\\frac{3 \mu_{0} x y}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}} & - \frac{\mu_{0} \left(x^{2} - 2 y^{2} + z^{2}\right)}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}} & \frac{3 \mu_{0} y z}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}}\\\frac{3 \mu_{0} x z}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}} & \frac{3 \mu_{0} y z}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}} & - \frac{\mu_{0} \left(x^{2} + y^{2} - 2 z^{2}\right)}{4 \pi \left(x^{2} + y^{2} + z^{2}\right)^{\frac{5}{2}}}
+\end{bmatrix}
+\end{align}
+Each matrix element has the term $(x^2 + y^2 + z^2)^{-5/2} = r^{-5}$, and the diagonal matrix elements have terms like (for example in $\mathbb{A}_\mathrm{dip}^{zz}$): 
+\begin{equation}
+-x^2 + -y^2 + 2z^2 = -x^2 - y^2 - z^2 + 3z^2 = -(x^2 + y^2 + z^2) + 3z^2 = -r^2 + 3z^2
+\end{equation}
+To get the units right, we need to allow for input of the magnetic moment vector $\mathbf{m}$ in Bohr magnetons, so we need to multiply by the Bohr magneton in SI units. Finally, the above simplifications yields the dipole hyperfine coupling tensor to a nuclear spin at position $\mathbf{r}$ due to a magnetic moment at the origin. 
+\begin{equation}
+\label{eqn:A_dip_final}
+	\mathbb{A}_\mathrm{dip} = \frac{\mu_0 \mu_B}{4 \pi}
+	\begin{bmatrix} 
+		\frac{3x^2 - r^2}{r^5} & \frac{3xy}{r^5}        & \frac{3xz}{r^5}        \\ 
+		\frac{3yx}{r^5}        & \frac{3y^2 - r^2}{r^5} & \frac{3yz}{r^5}        \\ 
+		\frac{3zx}{r^5}        & \frac{3zy}{r^5}        & \frac{3z^2 - r^2}{r^5}
+	\end{bmatrix}
+\end{equation}
+and the magnetic induction:
+\begin{align}
+\label{eqn:magnetic_induction_matrices_final1}
+\mathbf{B}({\mathbf{r}}) &= \mathbb{A}_\mathrm{dip} \cdot \mathbf{m} \\
+\label{eqn:magnetic_induction_matrices_final2}
+\mathbf{B}({\mathbf{r}}) &= \frac{\mu_0 \mu_B}{4\pi}
+	\begin{bmatrix} 
+		\frac{3x^2 - r^2}{r^5} & \frac{3xy}{r^5}        & \frac{3xz}{r^5}        \\ 
+		\frac{3yx}{r^5}        & \frac{3y^2 - r^2}{r^5} & \frac{3yz}{r^5}        \\ 
+		\frac{3zx}{r^5}        & \frac{3zy}{r^5}        & \frac{3z^2 - r^2}{r^5}
+	\end{bmatrix}
+\begin{bmatrix}
+m_x \\
+m_y \\
+m_z
+\end{bmatrix}
+\end{align}
+where the components of $\mathbf{m}$ are in Bohr magnetons.
+
+However, we have one final issue, we actually want to find the hyperfine coupling tensor the other way around, i.e. a magnetic moment at position $\mathbf{r}$ and the hyperfine coupling of said spin to the nucleus at the origin. This is equivalent to a translation from $\mathbf{r} \rightarrow -\mathbf{r}$, as can be seen above in equation \ref{eqn:magnetic_induction_matrices_final2}, the magnetic induction of a dipole moment is identical under $\mathbf{B}({\mathbf{r}}) = \mathbf{B}({\mathbf{-r}})$. Therefore, equation \ref{eqn:magnetic_induction_matrices_final2} is our final answer for the magnetic induction and \ref{eqn:A_dip_final} is the final answer for the dipole hyperfine coupling tensor. 
+% raw code for reference
+%A_xx = (3*relative_positions_x**2 - relative_distances**2)/relative_distances**5
+%A_xy = 3*relative_positions_x*relative_positions_y/relative_distances**5
+%A_xz = 3*relative_positions_x*relative_positions_z/relative_distances**5
+%A_yy = (3*relative_positions_y**2 - relative_distances**2)/relative_distances**5
+%A_yz = 3*relative_positions_y*relative_positions_z/relative_distances**5
+%A_zz = (3*relative_positions_z**2 - relative_distances**2)/relative_distances**5
+%
+%# define constants to get the units correct
+%mu_0 = 1.25663706212e-6 # vacuum permeability. units: H m^-1 = kg m s^-2 A^-2 
+%mu_B = 9.274009994e-24 # Bohr magneton. units: J T^-1 = m^2 A^-1
+%
+%Ai = mu_0/(4*np.pi)*np.column_stack((A_xx, A_xy, A_xz,
+%                                     A_xy, A_yy, A_yz,
+%                                     A_xz, A_yz, A_zz)).reshape(-1, 3, 3)*1e10**3*mu_B
+
+% some random other equations that could be useful in the future for cross product calcs
+%\begin{equation}
+%\mathbf{a} \times \mathbf{b} = \left( a_y b_z - a_z b_y \right) \hat{x} + \left( a_z b_x - a_x b_z \right) \hat{y} + \left( a_x b_y - a_y b_x \right) \hat{z}
+%\end{equation}
+
+%\begin{equation}
+%\nabla = \hat{x} \frac{\partial}{\partial x}  + \hat{y} \frac{\partial}{\partial y} + \hat{z} \frac{\partial}{\partial z}
+%\end{equation}
+
+\bibliography{equations.bib}
+
+\end{document}
