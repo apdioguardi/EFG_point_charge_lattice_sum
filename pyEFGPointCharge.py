@@ -149,6 +149,10 @@ class results:
     eta_samples = None
     # quadrupole frequency for each MC sample, shape (n_mc,); None if no Q given
     nu_Q_MHz_samples = None
+    # element symbols for each site in the calculation sphere, ordered the same
+    # as charge_positions. For disordered structures this reflects the last MC
+    # sample. Populated regardless of delete_plotting_arrays.
+    sphere_species = None
 
 ###############################################################################
 ###############################################################################
@@ -487,6 +491,8 @@ def calc_EFG_point_charge(input_parameters, results):
         # extract charges from tagged sites (all ordered), filtering out the probe site
         qi = np.array([site.properties['charge'] for site in sites_in_sphere])
         qi = qi[nonzero_indices]
+        results.sphere_species = [sites_in_sphere[i].specie.symbol
+                                  for i in nonzero_indices[0]]
         nonzero_indices = None
         sites_in_sphere = None
 
@@ -521,7 +527,12 @@ def calc_EFG_point_charge(input_parameters, results):
 
     # build a list of site property dicts, filtered to non-probe sites only
     # (same ordering as Vi_geom rows, which used nonzero_indices)
-    sphere_props = [sites_in_sphere[i].properties for i in nonzero_indices[0]]
+    _nz = nonzero_indices[0]
+    sphere_props = [sites_in_sphere[i].properties for i in _nz]
+    # save ordered-site species for VESTA snapshot (needed for last MC sample)
+    _ordered_species = {i: sites_in_sphere[_nz[i]].specie.symbol
+                        for i in range(len(_nz))
+                        if sites_in_sphere[_nz[i]].is_ordered}
     nonzero_indices = None
     sites_in_sphere = None
 
@@ -547,7 +558,9 @@ def calc_EFG_point_charge(input_parameters, results):
     qi_last = None
     V_ab_raw_last = None
 
-    for _ in range(n_monte_carlo_samples):
+    species_last = [None] * n_sphere_sites
+
+    for mc_iter in range(n_monte_carlo_samples):
         # for each MC step, first sample a configuration index for every group
         group_config_indices = [
             int(rng.choice(len(disorder_groups[g]['configurations']),
@@ -555,12 +568,16 @@ def calc_EFG_point_charge(input_parameters, results):
             for g in range(len(disorder_groups))
         ]
 
+        is_last = (mc_iter == n_monte_carlo_samples - 1)
+
         # build qi for this sample
         qi_sample = np.zeros(n_sphere_sites)
         for i, props in enumerate(sphere_props):
             dtype = props.get('_disorder_type', None)
             if dtype == 'ordered' or dtype is None:
                 qi_sample[i] = props['charge']
+                if is_last:
+                    species_last[i] = _ordered_species[i]
             elif dtype == 'group':
                 g = props['_group_index']
                 pos = props['_pos_in_group']
@@ -571,6 +588,8 @@ def calc_EFG_point_charge(input_parameters, results):
                 else:
                     site_index = disorder_groups[g]['site_indices'][pos]
                     qi_sample[i] = first_cell_charges[site_index][sp]
+                if is_last:
+                    species_last[i] = sp  # None for vacancy
             elif dtype == 'independent':
                 charge_map = props['_species_charges']
                 occ_weights = props['_occ_weights']
@@ -578,6 +597,8 @@ def calc_EFG_point_charge(input_parameters, results):
                 weights = np.array([occ_weights[s] for s in symbols])
                 chosen = symbols[int(rng.choice(len(symbols), p=weights/weights.sum()))]
                 qi_sample[i] = charge_map.get(chosen, 0.0)
+                if is_last:
+                    species_last[i] = chosen
 
         V_ab_raw = _compute_V_ab(qi_sample)
         V_aa, principal_axes, eta = _diagonalize(V_ab_raw)
@@ -613,8 +634,130 @@ def calc_EFG_point_charge(input_parameters, results):
     if not delete_plotting_arrays:
         results.charges = qi_last
 
+    results.sphere_species = species_last
+
     return results
 
+
+###############################################################################
+###############################################################################
+
+
+
+###############################################################################
+# VESTA snapshot ##############################################################
+###############################################################################
+
+def write_vesta_snapshot(input_parameters, results, output_file,
+                         relative_position_limits=None):
+    """
+    Write a VESTA-format file showing the atoms within the calculation sphere
+    (or a subset defined by relative_position_limits) for visual inspection.
+    For disordered structures, the species reflect the last MC sample.
+
+    Requires delete_plotting_arrays = False so that results.charge_positions
+    is available.
+
+    Parameters
+    ----------
+    input_parameters : input_parameters
+        The same input_parameters object passed to calc_EFG_point_charge.
+    results : results
+        The results object returned by calc_EFG_point_charge.
+    output_file : str
+        Path to the output .vesta file.
+    relative_position_limits : tuple of 6 floats, optional
+        (x_min_rel, x_max_rel, y_min_rel, y_max_rel, z_min_rel, z_max_rel)
+        Cartesian limits relative to the probe position (Angstroms).  Only
+        sites within these bounds are included.  If None, all sites in the
+        calculation sphere are written.
+    """
+    if results.charge_positions is None:
+        raise ValueError(
+            'write_vesta_snapshot requires charge_positions in results. '
+            'Set delete_plotting_arrays = False before running the calculation.')
+    if results.sphere_species is None:
+        raise ValueError(
+            'write_vesta_snapshot requires sphere_species in results. '
+            'Run calc_EFG_point_charge first.')
+
+    probe_position = results.probe_position
+    positions = results.charge_positions   # (N, 3) cartesian
+    species = list(results.sphere_species) # list of str (or None for vacancy)
+
+    # determine probe element
+    probe_site = results.structure[input_parameters.probe_site_index]
+    if probe_site.is_ordered:
+        probe_species = probe_site.specie.symbol
+    else:
+        probe_species = max(probe_site.species,
+                            key=lambda s: probe_site.species[s]).symbol
+
+    # apply position limits (same logic as visualization())
+    if relative_position_limits is not None:
+        x_min_rel, x_max_rel, y_min_rel, y_max_rel, z_min_rel, z_max_rel = \
+            relative_position_limits
+        px, py, pz = probe_position
+        mask = (
+            (positions[:, 0] > x_min_rel + px) &
+            (positions[:, 0] < x_max_rel + px) &
+            (positions[:, 1] > y_min_rel + py) &
+            (positions[:, 1] < y_max_rel + py) &
+            (positions[:, 2] > z_min_rel + pz) &
+            (positions[:, 2] < z_max_rel + pz)
+        )
+        positions = positions[mask]
+        species = [s for s, m in zip(species, mask) if m]
+
+    # filter out vacancies (None species from group disorder)
+    keep = [s is not None for s in species]
+    positions = positions[np.array(keep)]
+    species = [s for s, k in zip(species, keep) if k]
+
+    # combine probe site + surrounding atoms
+    all_positions = np.vstack([probe_position.reshape(1, 3), positions])
+    all_species = [probe_species] + species
+
+    # build a P1 bounding cell around the cluster
+    cart_min = all_positions.min(axis=0) - 1.0  # 1 Å padding
+    cart_max = all_positions.max(axis=0) + 1.0
+    cell_lengths = cart_max - cart_min
+    origin = cart_min
+
+    # fractional coordinates in the bounding cell
+    frac = (all_positions - origin) / cell_lengths
+
+    # unique labels: Element + running count
+    n_atoms = len(all_species)
+    elem_count = {}
+    labels = []
+    for sp in all_species:
+        elem_count[sp] = elem_count.get(sp, 0) + 1
+        labels.append(f'{sp}{elem_count[sp]}')
+
+    with open(output_file, 'w') as f:
+        f.write('#VESTA_FORMAT_VERSION 3.5.0\n\n')
+        f.write('CRYSTAL\n\n')
+        f.write('TITLE\n')
+        f.write('Snapshot from pyEFGPointCharge\n\n')
+        f.write('GROUP\n1 1\n\n')
+        f.write('CELLP\n')
+        f.write(f'  {cell_lengths[0]:.6f}  {cell_lengths[1]:.6f}'
+                f'  {cell_lengths[2]:.6f}  90.000000  90.000000  90.000000\n')
+        f.write('  0.000000  0.000000  0.000000  0.000000  0.000000  0.000000\n\n')
+        f.write('STRUC\n')
+        for i in range(n_atoms):
+            f.write(f'  {i+1}  {all_species[i]}  {labels[i]}  1.0'
+                    f'  {frac[i,0]:.6f}  {frac[i,1]:.6f}  {frac[i,2]:.6f}'
+                    f'  1.0  0\n')
+            f.write(f'                  0.000000  0.000000  0.000000  0.00\n')
+        f.write('  0 0 0 0 0\n\n')
+        f.write('THERI 0\n')
+        for i in range(n_atoms):
+            f.write(f'  {i+1}  {all_species[i]}  {labels[i]}  0.000000\n')
+        f.write('  0 0 0\n\n')
+        f.write('SHAPE\n 0 0 0 0 0 0 0 0\n\n')
+        f.write('BOUND\n 0  1  0  1  0  1\n 0 0 0 0 0\n')
 
 ###############################################################################
 ###############################################################################
