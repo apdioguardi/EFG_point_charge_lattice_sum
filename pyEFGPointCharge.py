@@ -84,6 +84,32 @@ class input_parameters:
     # Sternheimer antishielding factor (\gamma_\inf)
     gamma_sternheimer = 0
 
+    # number of Monte Carlo configurations to sample when disorder is present
+    n_monte_carlo_samples = 1000
+
+    # random seed for reproducibility of MC sampling (None for random)
+    random_seed = None
+
+    # correlated disorder groups. each entry is a dict with keys:
+    #   'site_indices': list of site indices involved in this group
+    #   'configurations': list of dicts, each with:
+    #       'species': list of species strings or None (vacancy), aligned with site_indices
+    #       'probability': float (optional; uniform assumed if omitted for all configs)
+    # sites in a group are sampled together as a unit. a site may belong to at most
+    # one group. sites in charge_site_indices but not in any group are sampled
+    # independently based on their CIF occupancy. defaults to [] (no correlated disorder).
+    # example:
+    #   disorder_groups = [
+    #       {
+    #           'site_indices': [D, A, B, C],
+    #           'configurations': [
+    #               {'species': ['X', 'Al', None, None], 'probability': 0.5},
+    #               {'species': ['Y', None, 'Si', 'Si'], 'probability': 0.5},
+    #           ]
+    #       }
+    #   ]
+    disorder_groups = []
+
 
 # a class for returning results of the calculation
 # all results are in cartesian coordinates!!!
@@ -118,6 +144,13 @@ class results:
     nu_z_MHz = None
     # nu_Q_MHz = nu_z_MHz(1 - eta**2/3)**0.5
     nu_Q_MHz = None
+    # --- Monte Carlo disorder results (None for ordered structures) ---
+    # eigenvalues for each MC sample, shape (n_mc, 3), ordered |V_xx|<=|V_yy|<=|V_zz|
+    V_aa_samples = None
+    # asymmetry parameter for each MC sample, shape (n_mc,)
+    eta_samples = None
+    # quadrupole frequency for each MC sample, shape (n_mc,); None if no Q given
+    nu_Q_MHz_samples = None
 
 ###############################################################################
 ###############################################################################
@@ -195,8 +228,8 @@ def calc_EFG_point_charge(input_parameters, results):
     between electron spins on a lattice and a particular probe nucleus and the
     electric field gradient tensor via a lattice-sum method.
     ############################################################################
-    ahoy! see input parameter and results classes for details on the inputs to 
-    this function 
+    ahoy! see input parameter and results classes for details on the inputs to
+    this function
     """
     # unpack the necessary attributes from the input_parameters class:
     cif_file_name = input_parameters.cif_file_name
@@ -210,17 +243,20 @@ def calc_EFG_point_charge(input_parameters, results):
     charge_site_indices = input_parameters.charge_site_indices
     first_cell_charges = input_parameters.first_cell_charges
     gamma_sternheimer = input_parameters.gamma_sternheimer
+    n_monte_carlo_samples = input_parameters.n_monte_carlo_samples
+    random_seed = input_parameters.random_seed
+    disorder_groups = input_parameters.disorder_groups
 
-    # load cif file and create a pymatgen.core.structure.Structure object with 
+    # load cif file and create a pymatgen.core.structure.Structure object with
     # the info from said file.
     structure = Structure.from_file(cif_file_name)
     structure.make_supercell(supercell_dimensions)
 
-    # modify the lattices of the structure and magnetic structure to the default 
+    # modify the lattices of the structure and magnetic structure to the default
     # orientation such that $a \parallel x$, $b$ in $x-y$ plane, and $c$ arbitrary
-    # we want to perform two rotations. first about the y-axis to align 
+    # we want to perform two rotations. first about the y-axis to align
     # the a direction with x. we'll get the angle via arctan for consistency
-    # with the second rotation. we could have just used 90 - beta, but 
+    # with the second rotation. we could have just used 90 - beta, but
     # the second rotation about the x-axis will require some trig anyway,
     # so lets just be consistent
     rotated_lattice = rotate_lattice(structure.lattice.matrix)
@@ -230,15 +266,132 @@ def calc_EFG_point_charge(input_parameters, results):
     results.structure = structure
     results.lattice = rotated_lattice
 
-    # get the nuclear quadrupole moment if an isotope is specified or a manual Q is given
-    if probe_nucleus is not None:
-        Q = isotope_data_dict[probe_nucleus]['Q']
-    elif manual_nuclear_quad_moment is not None:
-        Q = manual_nuclear_quad_moment
+    # define constants to get the units correct
+    epsilon_0 = 8.8541878128e-12 # permittivity of free space. units: F m^-1 = kg−1 m−3 s^4 A^2
+    e = 1.602176634e-19 # elementary charge. units: C = A s
+    h = 6.62607015e-34 # Planck constant. units: J s
 
-    # assign the charges to the sites in the first unit cell or supercell
+    # resolve nuclear quadrupole moment and spin
+    Q = None
+    I = None
+    if probe_nucleus is not None:
+        Q = isotope_data_dict[probe_nucleus]["Q"]*1e-28 #1 barn = 10^−28 m^2
+        I = isotope_data_dict[probe_nucleus]["I0"]
+    elif manual_nuclear_quad_moment is not None:
+        Q = manual_nuclear_quad_moment*1e-28 #1 barn = 10^−28 m^2
+        I = manual_nuclear_spin
+
+    ###########################################################################
+    # disorder setup: tag each charge site with its sampling info
+    ###########################################################################
+
+    # build a set of site indices that belong to a disorder group so we can
+    # distinguish them from independently-disordered sites
+    grouped_site_indices = set()
+    for group in disorder_groups:
+        for idx in group['site_indices']:
+            grouped_site_indices.add(idx)
+
+    # validate disorder groups
+    for g, group in enumerate(disorder_groups):
+        g_indices = group['site_indices']
+        g_configs = group['configurations']
+        for idx in g_indices:
+            if idx not in charge_site_indices:
+                raise ValueError(
+                    f"disorder_groups[{g}]: site index {idx} is not in charge_site_indices")
+        seen = set()
+        for idx in g_indices:
+            if idx in seen:
+                raise ValueError(
+                    f"disorder_groups[{g}]: site index {idx} appears more than once")
+            seen.add(idx)
+        n_sites_in_group = len(g_indices)
+        for c, config in enumerate(g_configs):
+            if len(config['species']) != n_sites_in_group:
+                raise ValueError(
+                    f"disorder_groups[{g}] config {c}: 'species' length "
+                    f"({len(config['species'])}) != number of site_indices ({n_sites_in_group})")
+            for k, sp in enumerate(config['species']):
+                if sp is not None:
+                    site_idx = g_indices[k]
+                    charge_entry = first_cell_charges[site_idx]
+                    if not isinstance(charge_entry, dict) or sp not in charge_entry:
+                        raise ValueError(
+                            f"disorder_groups[{g}] config {c}: species '{sp}' at site "
+                            f"{site_idx} not found in first_cell_charges[{site_idx}]")
+        probs = [cfg.get('probability', None) for cfg in g_configs]
+        if any(p is not None for p in probs):
+            total = sum(p for p in probs if p is not None)
+            if abs(total - 1.0) > 1e-6:
+                raise ValueError(
+                    f"disorder_groups[{g}]: probabilities sum to {total}, expected 1.0")
+
+    # also validate that no site index appears in more than one group
+    all_grouped = []
+    for g, group in enumerate(disorder_groups):
+        for idx in group['site_indices']:
+            if idx in all_grouped:
+                raise ValueError(
+                    f"Site index {idx} appears in more than one disorder group")
+            all_grouped.append(idx)
+
+    # determine whether any disorder is present (from groups or independent sites)
+    has_group_disorder = len(disorder_groups) > 0
+    has_independent_disorder = any(
+        idx not in grouped_site_indices and not structure[idx].is_ordered
+        for idx in charge_site_indices
+    )
+    has_disorder = has_group_disorder or has_independent_disorder
+
+    # tag each charge site with sampling metadata stored in site.properties so
+    # the info propagates through get_sites_in_sphere
     for index in charge_site_indices:
-        structure[index].properties['charge'] = first_cell_charges[index]
+        site = structure[index]
+        charge_entry = first_cell_charges[index]
+
+        if index in grouped_site_indices:
+            # group-sampled sites: find which group and position within it,
+            # store a reference so the MC loop can look up the config
+            for g, group in enumerate(disorder_groups):
+                if index in group['site_indices']:
+                    pos_in_group = group['site_indices'].index(index)
+                    site.properties['_disorder_type'] = 'group'
+                    site.properties['_group_index'] = g
+                    site.properties['_pos_in_group'] = pos_in_group
+                    # placeholder charge (will be overwritten per MC step)
+                    site.properties['charge'] = 0.0
+                    break
+
+        elif isinstance(charge_entry, dict):
+            # independently-disordered site: build species→charge map and
+            # occupancy weights from the CIF
+            species_charges = charge_entry  # e.g. {'Al': +3.0, 'Si': +4.0}
+            occ_weights = {}
+            for sp, occ in site.species.items():
+                sp_str = sp.symbol
+                if sp_str in species_charges:
+                    occ_weights[sp_str] = float(occ)
+            total_occ = sum(occ_weights.values())
+            if total_occ < 1.0 - 1e-6:
+                # implicit vacancy
+                occ_weights['_vacancy'] = 1.0 - total_occ
+            charge_map = dict(species_charges)
+            charge_map['_vacancy'] = 0.0
+            site.properties['_disorder_type'] = 'independent'
+            site.properties['_species_charges'] = charge_map
+            site.properties['_occ_weights'] = occ_weights
+            # placeholder charge
+            site.properties['charge'] = 0.0
+
+        else:
+            # fully ordered site: just store the scalar charge
+            site.properties['_disorder_type'] = 'ordered'
+            site.properties['charge'] = float(charge_entry)
+
+    ###########################################################################
+    # geometry: computed once, independent of charges
+    ###########################################################################
 
     # get the position in cartesian coordinates of the probe site
     probe_position = structure[probe_site_index].coords
@@ -257,7 +410,7 @@ def calc_EFG_point_charge(input_parameters, results):
 
     # calculate the relative distances
     relative_distances = np.linalg.norm(relative_positions, axis=1)
-    # get the indices of the nonzero relative distances, as we don't want to include 
+    # get the indices of the nonzero relative distances, as we don't want to include
     # the probe-site charge (although numpy properly deals with this with just warnings and nan values)
     # this is actually memory inefficient, because the index array is the same size as the relative distance
     # array so if we run into memory issues, could try a different method here... this was just the first
@@ -274,14 +427,6 @@ def calc_EFG_point_charge(input_parameters, results):
         results.charge_positions = positions
         positions = None
 
-    # create a numpy array of charges based on the propagation of the the first cell charges by get_sites_in_sphere
-    qi = np.array([site.properties['charge'] for site in sites_in_sphere])
-    # retain just the charges not at the probe site
-    qi = qi[nonzero_indices]
-
-    # delete objects that are no longer needed
-    sites_in_sphere = None
-    
     # extract the x, y, and z (cartesian coordinates) components of the r_vecs
     relative_positions_x = relative_positions[:, 0].flatten()
     relative_positions_y = relative_positions[:, 1].flatten()
@@ -293,91 +438,183 @@ def calc_EFG_point_charge(input_parameters, results):
 
     # delete this array that is no longer needed
     relative_positions = None
-    nonzero_indices = None
+    # note: nonzero_indices is kept alive until after qi / sphere_props are filtered below
 
-    # calculate the independent hyperfine coupling tensor elements
-    Vi_xx = (3*relative_positions_x**2 - relative_distances**2)/relative_distances**5 
+    # calculate the independent EFG tensor geometric factors (charge-independent)
+    Vi_xx = (3*relative_positions_x**2 - relative_distances**2)/relative_distances**5
     Vi_xy = 3*relative_positions_x*relative_positions_y/relative_distances**5
     Vi_xz = 3*relative_positions_x*relative_positions_z/relative_distances**5
     Vi_yy = (3*relative_positions_y**2 - relative_distances**2)/relative_distances**5
     Vi_yz = 3*relative_positions_y*relative_positions_z/relative_distances**5
     Vi_zz = (3*relative_positions_z**2 - relative_distances**2)/relative_distances**5
-    
+
     # delete arrays that are no longer needed
     relative_distances = None
     relative_positions_x = None
     relative_positions_y = None
     relative_positions_z = None
 
-    # define constants to get the units correct
-    epsilon_0 = 8.8541878128e-12 # permittivity of free space. units: F m^-1 = kg−1 m−3 s^4 A^2
-    e = 1.602176634e-19 # elementary charge. units: C = A s
-    h = 6.62607015e-34 # Planck constant. units: J s
+    # stack geometric factors into shape (N_sites, 3, 3) with SI prefactor baked in.
+    # units: V m^-2 per unit charge e, with positions in Angstroms converted to meters.
+    # scale = e / (4 pi epsilon_0) * (1e10)^3  [Angstrom^-3 -> m^-3]
+    scale = 1e10**3 * e / (4*np.pi*epsilon_0)
+    Vi_geom = np.column_stack((Vi_xx, Vi_xy, Vi_xz,
+                               Vi_xy, Vi_yy, Vi_yz,
+                               Vi_xz, Vi_yz, Vi_zz)).reshape(-1, 3, 3) * scale
 
-    # create stack the EFG tensor elements and reshape to form a stack
-    # of matrices with shape (N_sites, 3, 3), where N_charges is the number of
-    # charges remaining after removing those outside of the sphere of sphere_radius
-    # around the probe nucleus. Then we need the proper multiplicative constants
-    # for SI units. We first transform from Angstroms to meters by a factor of 
-    # (1e10 \AA/m)^3. Then we multiply by qi*e/(4\pi\epslion_0). The units of the 
-    # EFG should be V m^-2, so lets check:
-    # units of V are 
-    # m^-3 A s kg m^3 s^-4 A^-2
-    # kg s^-3 A^-1 = V m^-2    (SI base units of volts are V = kg·m2·s−3·A−1)
+    Vi_xx = None; Vi_xy = None; Vi_xz = None
+    Vi_yy = None; Vi_yz = None; Vi_zz = None
 
-    Vi = (np.column_stack((Vi_xx, Vi_xy, Vi_xz,
-                           Vi_xy, Vi_yy, Vi_yz,
-                           Vi_xz, Vi_yz, Vi_zz)).reshape(-1, 3, 3))*1e10**3*qi[:, np.newaxis, np.newaxis]*e/(4*np.pi*epsilon_0)
+    ###########################################################################
+    # helper: compute EFG tensor from a charges array
+    ###########################################################################
 
-    # delete arrays that are no longer needed
-    Vi_xx = None
-    Vi_xy = None
-    Vi_xz = None
-    Vi_yy = None
-    Vi_yz = None
-    Vi_zz = None
+    def _compute_V_ab(qi):
+        Vi = Vi_geom * qi[:, np.newaxis, np.newaxis]
+        return np.sum(np.nan_to_num(Vi), axis=0) * (1 - gamma_sternheimer)
 
-    # calculate the raw (not diagonalized) net EFG tensor based on the lattice sum
-    # and apply the sternheimer antishielding correction
-    V_ab_raw = np.sum(np.nan_to_num(Vi), axis=0)*(1 - gamma_sternheimer) # units of V m^-2
-    # update the results
-    results.V_ab_raw = V_ab_raw
+    def _diagonalize(V_ab_raw):
+        evals, evecs = np.linalg.eigh(V_ab_raw)
+        idx = np.argsort(np.abs(evals))
+        V_aa = evals[idx]
+        principal_axes = evecs[:, idx]
+        eta = (V_aa[0] - V_aa[1]) / V_aa[2]
+        return V_aa, principal_axes, eta
 
-    # to conserve memory or just delete it
-    if delete_plotting_arrays:
-        qi = None
-    else:
-        results.charges = qi
-        qi = None
+    ###########################################################################
+    # ordered-only path (no disorder): single calculation, fully backwards
+    # compatible with the original function behaviour
+    ###########################################################################
 
-    # extract the unordered eigenvalues and eigenvectors for the 
-    V_ab_raw_evals, V_ab_raw_evecs = np.linalg.eigh(V_ab_raw)
-    # sort the eigenvalues and eigenvectors in order of increasing magnitude
-    idx = np.argsort(np.abs(V_ab_raw_evals))
-    V_aa = V_ab_raw_evals[idx]
-    principal_axes = V_ab_raw_evecs[:, idx]
-    # eta = (V_xx - V_yy)/V_zz
-    eta = (V_aa[0] - V_aa[1])/V_aa[2]
-    # update the results so far
-    results.V_aa = V_aa
+    if not has_disorder:
+        # extract charges from tagged sites (all ordered), filtering out the probe site
+        qi = np.array([site.properties['charge'] for site in sites_in_sphere])
+        qi = qi[nonzero_indices]
+        nonzero_indices = None
+        sites_in_sphere = None
+
+        V_ab_raw = _compute_V_ab(qi)
+        results.V_ab_raw = V_ab_raw
+
+        if delete_plotting_arrays:
+            qi = None
+        else:
+            results.charges = qi
+            qi = None
+
+        V_aa, principal_axes, eta = _diagonalize(V_ab_raw)
+        results.V_aa = V_aa
+        results.principal_axes = principal_axes
+        results.eta = eta
+
+        if Q is not None:
+            nu_z_MHz = 3*e*Q*V_aa[2]/(2*I*(2*I - 1)*h)*1e-6
+            nu_Q_MHz = nu_z_MHz*(1 - eta**2/3)**0.5
+            results.Q = Q
+            results.nu_z_MHz = nu_z_MHz
+            results.nu_Q_MHz = nu_Q_MHz
+
+        return results
+
+    ###########################################################################
+    # disordered path: Monte Carlo sampling
+    ###########################################################################
+
+    rng = np.random.default_rng(random_seed)
+
+    # build a list of site property dicts, filtered to non-probe sites only
+    # (same ordering as Vi_geom rows, which used nonzero_indices)
+    sphere_props = [sites_in_sphere[i].properties for i in nonzero_indices[0]]
+    nonzero_indices = None
+    sites_in_sphere = None
+
+    # pre-build per-group probability arrays (normalised) for fast sampling
+    group_prob_arrays = []
+    for group in disorder_groups:
+        probs = [cfg.get('probability', None) for cfg in group['configurations']]
+        if all(p is None for p in probs):
+            n = len(group['configurations'])
+            probs = np.ones(n) / n
+        else:
+            probs = np.array([p if p is not None else 0.0 for p in probs], dtype=float)
+            probs /= probs.sum()
+        group_prob_arrays.append(probs)
+
+    # number of sites in the sphere (excluding probe)
+    n_sphere_sites = Vi_geom.shape[0]
+
+    V_aa_list = []
+    eta_list = []
+    nu_Q_list = []
+    # store last sample's qi and V_ab_raw for results.charges / results.V_ab_raw
+    qi_last = None
+    V_ab_raw_last = None
+
+    for _ in range(n_monte_carlo_samples):
+        # for each MC step, first sample a configuration index for every group
+        group_config_indices = [
+            int(rng.choice(len(disorder_groups[g]['configurations']),
+                           p=group_prob_arrays[g]))
+            for g in range(len(disorder_groups))
+        ]
+
+        # build qi for this sample
+        qi_sample = np.zeros(n_sphere_sites)
+        for i, props in enumerate(sphere_props):
+            dtype = props.get('_disorder_type', None)
+            if dtype == 'ordered' or dtype is None:
+                qi_sample[i] = props['charge']
+            elif dtype == 'group':
+                g = props['_group_index']
+                pos = props['_pos_in_group']
+                config_idx = group_config_indices[g]
+                sp = disorder_groups[g]['configurations'][config_idx]['species'][pos]
+                if sp is None:
+                    qi_sample[i] = 0.0
+                else:
+                    site_index = disorder_groups[g]['site_indices'][pos]
+                    qi_sample[i] = first_cell_charges[site_index][sp]
+            elif dtype == 'independent':
+                charge_map = props['_species_charges']
+                occ_weights = props['_occ_weights']
+                symbols = list(occ_weights.keys())
+                weights = np.array([occ_weights[s] for s in symbols])
+                chosen = symbols[int(rng.choice(len(symbols), p=weights/weights.sum()))]
+                qi_sample[i] = charge_map.get(chosen, 0.0)
+
+        V_ab_raw = _compute_V_ab(qi_sample)
+        V_aa, principal_axes, eta = _diagonalize(V_ab_raw)
+
+        V_aa_list.append(V_aa)
+        eta_list.append(eta)
+        if Q is not None:
+            nu_z = 3*e*Q*V_aa[2]/(2*I*(2*I - 1)*h)*1e-6
+            nu_Q_list.append(nu_z*(1 - eta**2/3)**0.5)
+
+        qi_last = qi_sample
+        V_ab_raw_last = V_ab_raw
+
+    # store sample distributions
+    results.V_aa_samples = np.array(V_aa_list)
+    results.eta_samples = np.array(eta_list)
+
+    # scalar results are means over the MC ensemble
+    results.V_aa = np.mean(results.V_aa_samples, axis=0)
+    results.eta = float(np.mean(results.eta_samples))
+    # principal axes from the last sample (representative orientation)
     results.principal_axes = principal_axes
-    results.eta = eta
-
-    # calculate isotope-specific values if an isotope is provided (MHz)
-    if probe_nucleus is not None:
-        Q = isotope_data_dict[probe_nucleus]["Q"]*1e-28 #1 barn = 10^−28 m^2
-        I = isotope_data_dict[probe_nucleus]["I0"]
-    elif manual_nuclear_quad_moment is not None:
-        Q = manual_nuclear_quad_moment*1e-28 #1 barn = 10^−28 m^2
-        I = manual_nuclear_spin
+    results.V_ab_raw = V_ab_raw_last
 
     if Q is not None:
-        nu_z_MHz = 3*e*Q*V_aa[2]/(2*I*(2*I - 1)*h)*1e-6  # 10^-6 for MHz
-        nu_Q_MHz = nu_z_MHz*(1 - eta**2/3)**0.5
-        # update the results
-        results.Q = Q # m^2
-        results.nu_z_MHz = nu_z_MHz
-        results.nu_Q_MHz = nu_Q_MHz
+        results.nu_Q_MHz_samples = np.array(nu_Q_list)
+        results.nu_Q_MHz = float(np.mean(results.nu_Q_MHz_samples))
+        # nu_z_MHz from the mean V_zz
+        nu_z_mean = 3*e*Q*results.V_aa[2]/(2*I*(2*I - 1)*h)*1e-6
+        results.nu_z_MHz = nu_z_mean
+        results.Q = Q
+
+    if not delete_plotting_arrays:
+        results.charges = qi_last
 
     return results
 
