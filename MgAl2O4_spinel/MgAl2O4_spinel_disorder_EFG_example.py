@@ -7,9 +7,9 @@
 #            In-situ neutron diffraction at T = 673 K (heating cycle)
 #            COD entry 9002084
 #
-# Disorder: cation inversion -- a fraction i of Al³⁺ occupies the normally
-#           Mg²⁺ tetrahedral (8a) site, and the same fraction i of Mg²⁺
-#           occupies the normally Al³⁺ octahedral (16d) site.
+# Disorder: cation inversion -- a fraction i of Al3+ occupies the normally
+#           Mg2+ tetrahedral (8a) site, and the same fraction i of Mg2+
+#           occupies the normally Al3+ octahedral (16d) site.
 #           At 673 K: i = 0.155 (from Al1 occupancy at the 8a site)
 #
 #           8a  (tetrahedral): Mg (occ=0.845) + Al (occ=0.155)
@@ -20,11 +20,11 @@
 #
 # Experimental 27Al NMR reference values (from literature):
 #   Octahedral Al [16d] in near-normal spinel:
-#       Cq ~ 3.3–3.7 MHz, eta ~ 0  (D3d local symmetry, ordered limit)
+#       Cq ~ 3.3-3.7 MHz, eta ~ 0  (D3d local symmetry, ordered limit)
 #   Tetrahedral Al [8a] (inverted Al):
 #       Cq ~ 1.6 MHz,    eta ~ 0  (S4 local symmetry, ordered limit)
 #   Both sites show a DISTRIBUTION of Cq when disorder is present,
-#   extending up to ~5–7 MHz for octahedral sites near inverted neighbors.
+#   extending up to ~5-7 MHz for octahedral sites near inverted neighbors.
 #   References:
 #       Millard et al. (1992) Am. Min. 77, 44-52
 #       Kashii et al. (1999) J. Am. Ceram. Soc. 82, 1229-1235
@@ -171,8 +171,8 @@ print("  eta ~ 0 (ordered), 0-0.4 (disordered)")
 #
 # NOTE: in the correlated model the marginal occupancies of each site
 # individually reproduce the CIF values exactly:
-#   P(8a = Al)  = i = 0.155  ✓
-#   P(16d = Mg) = i = 0.155  ✓  (but note: 16d has 16 sites and 8a has 8,
+#   P(8a = Al)  = i = 0.155
+#   P(16d = Mg) = i = 0.155   (but note: 16d has 16 sites and 8a has 8,
 #    so stoichiometry requires each 8a-Al is correlated with 2 16d-Mg sites
 #    if the pairing is 1:2. For simplicity this example uses 1:1 pairs.)
 

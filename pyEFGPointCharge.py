@@ -27,16 +27,14 @@ class input_parameters:
     # path to cif file
     cif_file_name = None
 
-    # create a supercell if one is required to define the magnetic structure
+    # create a supercell if one is required to define the charge structure
     # the supercell_dimensions parameter should be a list of form [Na, Nb, Nc],
     # where Na, Nb, and Nc are integers that represent the number of unit cells
-    # in the crystallographic a, b, and c directions, respectivly, contained in
-    # the supercell. For example, [1, 1, 2] will create a supercell that is 
+    # in the crystallographic a, b, and c directions, respectively, contained in
+    # the supercell. For example, [1, 1, 2] will create a supercell that is
     # 1 x 1 x 2 unit cells in size. Note: creating a supercell modifies the
-    # lattice as well, therefore one must specify the magnetic_site_indices,
-    # probe indices, etc. in the supercell. see the following for deteails
-    # dipole_hyperfine_lattice_sum/ipynb_examples/LiCuVO4/
-    # LiCuVO4_dipole_hyperfine_calc_2021-08-30.ipynb
+    # lattice as well, therefore one must specify the charge_site_indices,
+    # probe indices, etc. in the supercell.
     supercell_dimensions = [1, 1, 1]
 
     # choose the radius around which we will include spins in angstroms with 
@@ -67,8 +65,8 @@ class input_parameters:
 
     # define the charge sites by index in the cif file (list of ints)
     # Note: that site indices in pymatgen start at zero.
-    # Further Note: if creating a supercell, one must include all magetic 
-    # site indices in the supercell. therefore the user must first know the 
+    # Further Note: if creating a supercell, one must include all charge
+    # site indices in the supercell. therefore the user must first know the
     # site indices.
     charge_site_indices = None
 
@@ -192,7 +190,7 @@ def rotate_lattice(lattice_matrix):
     """
     function to rotate the lattice matrix from the default orientation, which 
     is that z and c are aligned, to a more reasonable default orientation, especially
-    for dealing with monoclinic structures, but that is also consisten with triclinic
+    for dealing with monoclinic structures, but that is also consistent with triclinic
     structures. rotate such that $a||x$, $b$ in $x-y$ plane, and $c$ arbitrary
     we want to perform two rotations. first about the y-axis to align 
     the a direction with x. we'll get the angle via arctan for consistency
@@ -224,9 +222,8 @@ def rotate_lattice(lattice_matrix):
 
 def calc_EFG_point_charge(input_parameters, results):
     """
-    A function to calculate the direct dipolar hyperfine coupling tensor A
-    between electron spins on a lattice and a particular probe nucleus and the
-    electric field gradient tensor via a lattice-sum method.
+    Calculate the electric field gradient (EFG) tensor at a probe nucleus
+    via a point-charge lattice-sum method.
     ############################################################################
     ahoy! see input parameter and results classes for details on the inputs to
     this function
@@ -267,7 +264,7 @@ def calc_EFG_point_charge(input_parameters, results):
     results.lattice = rotated_lattice
 
     # define constants to get the units correct
-    epsilon_0 = 8.8541878128e-12 # permittivity of free space. units: F m^-1 = kg−1 m−3 s^4 A^2
+    epsilon_0 = 8.8541878128e-12 # permittivity of free space. units: F m^-1 = kg^-1 m^-3 s^4 A^2
     e = 1.602176634e-19 # elementary charge. units: C = A s
     h = 6.62607015e-34 # Planck constant. units: J s
 
@@ -275,10 +272,10 @@ def calc_EFG_point_charge(input_parameters, results):
     Q = None
     I = None
     if probe_nucleus is not None:
-        Q = isotope_data_dict[probe_nucleus]["Q"]*1e-28 #1 barn = 10^−28 m^2
+        Q = isotope_data_dict[probe_nucleus]["Q"]*1e-28 #1 barn = 10^-28 m^2
         I = isotope_data_dict[probe_nucleus]["I0"]
     elif manual_nuclear_quad_moment is not None:
-        Q = manual_nuclear_quad_moment*1e-28 #1 barn = 10^−28 m^2
+        Q = manual_nuclear_quad_moment*1e-28 #1 barn = 10^-28 m^2
         I = manual_nuclear_spin
 
     ###########################################################################
@@ -364,7 +361,7 @@ def calc_EFG_point_charge(input_parameters, results):
                     break
 
         elif isinstance(charge_entry, dict):
-            # independently-disordered site: build species→charge map and
+            # independently-disordered site: build species->charge map and
             # occupancy weights from the CIF
             species_charges = charge_entry  # e.g. {'Al': +3.0, 'Si': +4.0}
             occ_weights = {}
@@ -404,7 +401,7 @@ def calc_EFG_point_charge(input_parameters, results):
     # comprehension. it is possible that one could use some numpy vectorization magic
     # here but for now it is fast enough for our purposes
     positions = np.array([site.coords for site in sites_in_sphere])
-    # calc relative postions to the probe postion
+    # calc relative positions to the probe position
     results.probe_position = probe_position
     relative_positions = positions - probe_position
 

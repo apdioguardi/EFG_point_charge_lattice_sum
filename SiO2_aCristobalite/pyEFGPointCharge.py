@@ -308,7 +308,7 @@ def calc_EFG_point_charge(input_parameters, results):
     relative_positions_z = None
 
     # define constants to get the units correct
-    epsilon_0 = 8.8541878128e-12 # permittivity of free space. units: F m^-1 = kg−1 m−3 s^4 A^2
+    epsilon_0 = 8.8541878128e-12 # permittivity of free space. units: F m^-1 = kg^-1 m^-3 s^4 A^2
     e = 1.602176634e-19 # elementary charge. units: C = A s
     h = 6.62607015e-34 # Planck constant. units: J s
 
@@ -321,7 +321,7 @@ def calc_EFG_point_charge(input_parameters, results):
     # EFG should be V m^-2, so lets check:
     # units of V are 
     # m^-3 A s kg m^3 s^-4 A^-2
-    # kg s^-3 A^-1 = V m^-2    (SI base units of volts are V = kg·m2·s−3·A−1)
+    # kg s^-3 A^-1 = V m^-2    (SI base units of volts are V = kg m2 s^-3 A^-1)
 
     Vi = (np.column_stack((Vi_xx, Vi_xy, Vi_xz,
                            Vi_xy, Vi_yy, Vi_yz,
@@ -363,10 +363,10 @@ def calc_EFG_point_charge(input_parameters, results):
 
     # calculate isotope-specific values if an isotope is provided (MHz)
     if probe_nucleus is not None:
-        Q = isotope_data_dict[probe_nucleus]["Q"]*1e-28 #1 barn = 10^−28 m^2
+        Q = isotope_data_dict[probe_nucleus]["Q"]*1e-28 #1 barn = 10^-28 m^2
         I = isotope_data_dict[probe_nucleus]["I0"]
     elif manual_nuclear_quad_moment is not None:
-        Q = manual_nuclear_quad_moment*1e-28 #1 barn = 10^−28 m^2
+        Q = manual_nuclear_quad_moment*1e-28 #1 barn = 10^-28 m^2
         I = manual_nuclear_spin
 
     if Q is not None:

@@ -1,2 +1,5 @@
 **/.DS_Store
 ./PuB4_unfinished
+.claude
+**/.ipynb_checkpoints
+**/__pycache__

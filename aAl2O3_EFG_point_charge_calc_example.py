@@ -18,7 +18,7 @@ import time
 
 input_pars = pyEFGPointCharge.input_parameters()
 # path to cif file
-input_pars.cif_file_name = 'Ishizawa_1980_aAl2O3_300K_EntryWithCollCode10425.cif'
+input_pars.cif_file_name = 'EFG_point_charge_aAlO2/Ishizawa_1980_aAl2O3_300K_EntryWithCollCode10425.cif'
 
 # create a supercell if one is required to define the magnetic structure
 # the supercell_dimensions parameter should be a list of form [Na, Nb, Nc],
@@ -118,7 +118,7 @@ results = pyEFGPointCharge.results()
 
 # plot or not
 run_visualization = True
-# plot inclusion minimum/maximum in angtroms, all linked, but one can modify the values individually below
+# plot inclusion minimum/maximum in angstroms, all linked, but one can modify the values individually below
 minmax=10
 
 
