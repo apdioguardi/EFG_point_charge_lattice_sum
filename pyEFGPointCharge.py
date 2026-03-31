@@ -108,6 +108,43 @@ class input_parameters:
     #   ]
     disorder_groups = []
 
+    # correlated disorder chains (Markov chains along a crystallographic axis).
+    # each entry is a dict with keys:
+    #   'chain_axis': 'a', 'b', or 'c' — axis along which the chain propagates
+    #   'site_indices_per_cell': list of lists — each sublist contains the site
+    #       indices for one repeat unit (cell) along the chain, ordered sequentially
+    #       along chain_axis. all sublists must have the same length.
+    #   'states': list of strings — boundary-state labels for the Markov chain
+    #   'transitions': list of dicts, each with:
+    #       'state_in': str — incoming boundary state
+    #       'state_out': str — outgoing boundary state
+    #       'species': list of species strings or None (vacancy), aligned with
+    #           site_indices within one cell
+    #       'weight': float — unnormalized weight (normalised per state_in)
+    # chains enforce nearest-neighbour correlations along one axis with periodic
+    # boundary conditions. chains at different positions perpendicular to the
+    # chain axis are sampled independently.
+    # example:
+    #   disorder_chains = [{
+    #       'chain_axis': 'c',
+    #       'site_indices_per_cell': [
+    #           [BrOH_0, Y_center_0, Y_near_0, Y_far_0],
+    #           [BrOH_1, Y_center_1, Y_near_1, Y_far_1],
+    #       ],
+    #       'states': ['OH', 'Br'],
+    #       'transitions': [
+    #           {'state_in': 'OH', 'state_out': 'OH',
+    #            'species': ['OH', 'Y', None, None], 'weight': 0.5},
+    #           {'state_in': 'OH', 'state_out': 'Br',
+    #            'species': ['OH', None, 'Y', None], 'weight': 0.5},
+    #           {'state_in': 'Br', 'state_out': 'OH',
+    #            'species': ['Br', None, None, 'Y'], 'weight': 0.5},
+    #           {'state_in': 'Br', 'state_out': 'Br',
+    #            'species': ['Br', 'Y', None, None], 'weight': 0.5},
+    #       ],
+    #   }]
+    disorder_chains = []
+
 
 # a class for returning results of the calculation
 # all results are in cartesian coordinates!!!
@@ -247,6 +284,7 @@ def calc_EFG_point_charge(input_parameters, results):
     n_monte_carlo_samples = input_parameters.n_monte_carlo_samples
     random_seed = input_parameters.random_seed
     disorder_groups = input_parameters.disorder_groups
+    disorder_chains = input_parameters.disorder_chains
 
     # load cif file and create a pymatgen.core.structure.Structure object with
     # the info from said file.
@@ -293,6 +331,12 @@ def calc_EFG_point_charge(input_parameters, results):
         for idx in group['site_indices']:
             grouped_site_indices.add(idx)
 
+    chained_site_indices = set()
+    for chain in disorder_chains:
+        for cell_sites in chain['site_indices_per_cell']:
+            for idx in cell_sites:
+                chained_site_indices.add(idx)
+
     # validate disorder groups
     for g, group in enumerate(disorder_groups):
         g_indices = group['site_indices']
@@ -337,13 +381,98 @@ def calc_EFG_point_charge(input_parameters, results):
                     f"Site index {idx} appears in more than one disorder group")
             all_grouped.append(idx)
 
-    # determine whether any disorder is present (from groups or independent sites)
+    # validate disorder chains
+    for k, chain in enumerate(disorder_chains):
+        if chain.get('chain_axis') not in ('a', 'b', 'c'):
+            raise ValueError(
+                f"disorder_chains[{k}]: 'chain_axis' must be 'a', 'b', or 'c'")
+        cells = chain['site_indices_per_cell']
+        if len(cells) < 1:
+            raise ValueError(
+                f"disorder_chains[{k}]: 'site_indices_per_cell' must have "
+                f"at least one cell")
+        n_sites_per_cell = len(cells[0])
+        for c_idx, cell_sites in enumerate(cells):
+            if len(cell_sites) != n_sites_per_cell:
+                raise ValueError(
+                    f"disorder_chains[{k}] cell {c_idx}: length "
+                    f"({len(cell_sites)}) != expected ({n_sites_per_cell})")
+            for idx in cell_sites:
+                if idx not in charge_site_indices:
+                    raise ValueError(
+                        f"disorder_chains[{k}] cell {c_idx}: site index {idx} "
+                        f"is not in charge_site_indices")
+        states = chain.get('states', [])
+        if len(states) < 1:
+            raise ValueError(
+                f"disorder_chains[{k}]: 'states' must have at least one state")
+        transitions = chain.get('transitions', [])
+        if len(transitions) < 1:
+            raise ValueError(
+                f"disorder_chains[{k}]: 'transitions' must have at least "
+                f"one transition")
+        for t_idx, t in enumerate(transitions):
+            if t['state_in'] not in states:
+                raise ValueError(
+                    f"disorder_chains[{k}] transition {t_idx}: state_in "
+                    f"'{t['state_in']}' not in states")
+            if t['state_out'] not in states:
+                raise ValueError(
+                    f"disorder_chains[{k}] transition {t_idx}: state_out "
+                    f"'{t['state_out']}' not in states")
+            if len(t['species']) != n_sites_per_cell:
+                raise ValueError(
+                    f"disorder_chains[{k}] transition {t_idx}: 'species' "
+                    f"length ({len(t['species'])}) != sites per cell "
+                    f"({n_sites_per_cell})")
+            if t.get('weight', 0) <= 0:
+                raise ValueError(
+                    f"disorder_chains[{k}] transition {t_idx}: 'weight' "
+                    f"must be positive")
+            for p, sp in enumerate(t['species']):
+                if sp is not None:
+                    for cell_sites in cells:
+                        site_idx = cell_sites[p]
+                        charge_entry = first_cell_charges[site_idx]
+                        if not isinstance(charge_entry, dict) \
+                                or sp not in charge_entry:
+                            raise ValueError(
+                                f"disorder_chains[{k}] transition {t_idx}: "
+                                f"species '{sp}' at position {p} not found "
+                                f"in first_cell_charges[{site_idx}]")
+        # check every state has at least one outgoing transition
+        states_with_out = set(t['state_in'] for t in transitions)
+        for s in states:
+            if s not in states_with_out:
+                raise ValueError(
+                    f"disorder_chains[{k}]: state '{s}' has no outgoing "
+                    f"transitions")
+
+    # validate no overlap between groups and chains, and no duplicate chain sites
+    all_chained = []
+    for k, chain in enumerate(disorder_chains):
+        for cell_sites in chain['site_indices_per_cell']:
+            for idx in cell_sites:
+                if idx in all_grouped:
+                    raise ValueError(
+                        f"Site index {idx} appears in both a disorder group "
+                        f"and a chain")
+                if idx in all_chained:
+                    raise ValueError(
+                        f"Site index {idx} appears more than once in "
+                        f"disorder chains")
+                all_chained.append(idx)
+
+    # determine whether any disorder is present (groups, chains, or independent)
     has_group_disorder = len(disorder_groups) > 0
+    has_chain_disorder = len(disorder_chains) > 0
     has_independent_disorder = any(
-        idx not in grouped_site_indices and not structure[idx].is_ordered
+        idx not in grouped_site_indices and idx not in chained_site_indices
+        and not structure[idx].is_ordered
         for idx in charge_site_indices
     )
-    has_disorder = has_group_disorder or has_independent_disorder
+    has_disorder = has_group_disorder or has_chain_disorder \
+        or has_independent_disorder
 
     # tag each charge site with sampling metadata stored in site.properties so
     # the info propagates through get_sites_in_sphere
@@ -362,6 +491,24 @@ def calc_EFG_point_charge(input_parameters, results):
                     site.properties['_pos_in_group'] = pos_in_group
                     # placeholder charge (will be overwritten per MC step)
                     site.properties['charge'] = 0.0
+                    break
+
+        elif index in chained_site_indices:
+            # chain-sampled sites: find which chain, cell, and position
+            for k, chain in enumerate(disorder_chains):
+                found = False
+                for cell_idx, cell_sites in enumerate(
+                        chain['site_indices_per_cell']):
+                    if index in cell_sites:
+                        pos_in_cell = cell_sites.index(index)
+                        site.properties['_disorder_type'] = 'chain'
+                        site.properties['_chain_def_index'] = k
+                        site.properties['_cell_in_chain'] = cell_idx
+                        site.properties['_pos_in_cell'] = pos_in_cell
+                        site.properties['charge'] = 0.0
+                        found = True
+                        break
+                if found:
                     break
 
         elif isinstance(charge_entry, dict):
@@ -548,6 +695,48 @@ def calc_EFG_point_charge(input_parameters, results):
             probs /= probs.sum()
         group_prob_arrays.append(probs)
 
+    # pre-build chain data structures (transfer matrices, stationary dists)
+    chain_data = []
+    for k, chain_def in enumerate(disorder_chains):
+        states = chain_def['states']
+        n_states = len(states)
+        state_to_idx = {s: i for i, s in enumerate(states)}
+        transitions = chain_def['transitions']
+        n_cells = len(chain_def['site_indices_per_cell'])
+
+        # per-state outgoing transitions with normalised weights
+        trans_by_state = {s: [] for s in states}
+        for t in transitions:
+            trans_by_state[t['state_in']].append(t)
+        trans_weights_norm = {}
+        for s in states:
+            ws = np.array([t['weight'] for t in trans_by_state[s]])
+            trans_weights_norm[s] = ws / ws.sum()
+
+        # transfer matrix T[i,j] = P(state_out=j | state_in=i)
+        T = np.zeros((n_states, n_states))
+        for s in states:
+            si = state_to_idx[s]
+            for t in trans_by_state[s]:
+                T[si, state_to_idx[t['state_out']]] += t['weight']
+            T[si] /= T[si].sum()
+
+        # stationary distribution (left eigenvector with eigenvalue 1)
+        evals, evecs = np.linalg.eig(T.T)
+        idx_1 = np.argmin(np.abs(evals - 1.0))
+        pi = np.abs(np.real(evecs[:, idx_1]))
+        pi /= pi.sum()
+
+        chain_data.append({
+            'states': states,
+            'n_states': n_states,
+            'n_cells': n_cells,
+            'trans_by_state': trans_by_state,
+            'trans_weights_norm': trans_weights_norm,
+            'stationary': pi,
+            'site_indices_per_cell': chain_def['site_indices_per_cell'],
+        })
+
     # number of sites in the sphere (excluding probe)
     n_sphere_sites = Vi_geom.shape[0]
 
@@ -567,6 +756,47 @@ def calc_EFG_point_charge(input_parameters, results):
                            p=group_prob_arrays[g]))
             for g in range(len(disorder_groups))
         ]
+
+        # sample each disorder chain (Markov chain with periodic boundaries)
+        chain_charges_mc = {}
+        chain_species_mc = {}
+        for k, cd in enumerate(chain_data):
+            states = cd['states']
+            n_states = cd['n_states']
+            n_cells = cd['n_cells']
+            pi = cd['stationary']
+            trans_by_state = cd['trans_by_state']
+            trans_weights_norm = cd['trans_weights_norm']
+
+            # rejection sampling: redraw until chain wraps periodically
+            for _attempt in range(10000):
+                state = states[int(rng.choice(n_states, p=pi))]
+                initial_state = state
+                cell_transitions = []
+                for cell_idx in range(n_cells):
+                    ts = trans_by_state[state]
+                    ws = trans_weights_norm[state]
+                    chosen = ts[int(rng.choice(len(ts), p=ws))]
+                    cell_transitions.append(chosen)
+                    state = chosen['state_out']
+                if state == initial_state:
+                    break
+            else:
+                raise RuntimeError(
+                    f"disorder_chains[{k}]: failed to close periodic chain "
+                    f"after 10000 attempts")
+
+            # assign charges from sampled transitions
+            for cell_idx, t in enumerate(cell_transitions):
+                cell_sites = cd['site_indices_per_cell'][cell_idx]
+                for pos, (site_idx, sp) in enumerate(
+                        zip(cell_sites, t['species'])):
+                    if sp is None:
+                        charge = 0.0
+                    else:
+                        charge = first_cell_charges[site_idx][sp]
+                    chain_charges_mc[(k, cell_idx, pos)] = charge
+                    chain_species_mc[(k, cell_idx, pos)] = sp
 
         is_last = (mc_iter == n_monte_carlo_samples - 1)
 
@@ -590,6 +820,13 @@ def calc_EFG_point_charge(input_parameters, results):
                     qi_sample[i] = first_cell_charges[site_index][sp]
                 if is_last:
                     species_last[i] = sp  # None for vacancy
+            elif dtype == 'chain':
+                ck = props['_chain_def_index']
+                ccell = props['_cell_in_chain']
+                cpos = props['_pos_in_cell']
+                qi_sample[i] = chain_charges_mc[(ck, ccell, cpos)]
+                if is_last:
+                    species_last[i] = chain_species_mc[(ck, ccell, cpos)]
             elif dtype == 'independent':
                 charge_map = props['_species_charges']
                 occ_weights = props['_occ_weights']
